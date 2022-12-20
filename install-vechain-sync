@@ -1,0 +1,161 @@
+#!/bin/bash
+
+set -ueo pipefail
+
+VECHAIN_URL=env.vechain.org
+GITHUB_ORG=vechain
+GITHUB_REPO=thor-sync.electron
+
+TEMPFILE=$(tempfile)
+cleanup() {
+  rm -f $TEMPFILE
+}
+
+trap cleanup exit
+
+fail() {
+  echo
+  echo >&2 "WARNING: $appimage appears to be corrupt."
+  echo >&2 $1
+  exit 1
+}
+
+query_github_urls() {
+  curl -s https://api.github.com/repos/${GITHUB_ORG}/${GITHUB_REPO}/releases/latest |\
+    awk '/browser_download_url/{print $2}' |\
+    tr -d '"'
+}
+cached_github_urls=$(query_github_urls)
+github_urls() {
+  echo "$cached_github_urls"
+}
+
+query_vechain() {
+  if [ -e vechain.html ]; then
+     echo >&2 'WARNING: reading cached vechain.html'
+     cat vechain.html
+  else
+     curl -s https://${VECHAIN_URL}
+  fi
+}
+
+query_vechain_urls() {
+  query_vechain |\
+  sed -n 's/<[/]*a/\n/gp;' |\
+  grep 'href='|\
+  grep 'linux'
+}
+cached_vechain_urls=$(query_vechain_urls)
+vechain_urls() {
+  echo "$cached_vechain_urls"
+}
+
+vechain_webpage_url() {
+  vechain_urls | grep AppImage | grep github |\
+  sed -n 's/.*href="\([^"]*\).*/\1/p' | sort | tail -1
+}
+
+vechain_webpage_version() {
+  vechain_webpage_url | sed -n '/AppImage/s/.*x86_64-\(.*\).AppImage/\1/p'
+}
+
+vechain_webpage_checksum() {
+  vechain_urls |\
+  sed -n "/x86_64-$(vechain_webpage_version)\.AppImage.*base64.txt/p" |\
+  sed -n 's/.*href="data:,\([^"]*\)".*/\1/p'
+}
+
+sha512_base64_checksum() {
+  FILE=$1
+  sha512sum $FILE | cut -d' ' -f 1 | xxd -r -p | base64 -w0
+}
+
+vechain_appimage_url=$(vechain_webpage_url)
+vechain_version=$(vechain_webpage_version)
+vechain_checksum=$(vechain_webpage_checksum)
+github_appimage_url=$(github_urls | grep AppImage)
+github_metadata_url=$(github_urls | grep latest-linux.yml)
+
+echo "----------------------"
+echo "VeChain Sync Installer"
+echo "----------------------"
+echo
+echo "VeChain project url: https://${VECHAIN_URL}"
+echo "  webpage latest version: $vechain_version"
+echo "  webpage appimage URL: $vechain_appimage_url"
+echo "  webpage checksum: $vechain_checksum"
+echo "Github repo: https://github.com/${GITHUB_ORG}/${GITHUB_REPO}.git"
+echo "  github latest release appimage URL: $github_appimage_url"
+echo "  github latest release metadata URL: $github_metadata_url"
+
+echo -n "Comparing VeChain website URL with github release URL..."
+if [ "$vechain_appimage_url" = "$github_appimage_url" ]; then
+  echo "OK"
+else
+  fail "VeChain website URL mismatches github release URL"
+fi
+
+echo -n "Downloading github release metadata..."
+release_metadata="$(curl -s -L $github_metadata_url)"
+echo "OK"
+
+echo -n "Reading version from github metadata..."
+metadata_version="$(echo "$release_metadata" | awk -F'[ :]*' '/version:/{print $2}')"
+echo "OK"
+
+echo -n "Reading appimage filename from github metadata..."
+appimage_filename="$(echo "$release_metadata" | awk -F'[ :]*' '/path:/{print $2}')"
+echo "OK"
+
+echo -n "Reading checksum from github metadata..."
+metadata_checksum="$(echo "$release_metadata" | awk -F'[ :]*' '/sha512:/{print $3}')"
+echo "OK"
+
+echo -n "Comparing VeChain website version with github latest release version..."
+if [ "$vechain_version" = "$metadata_version" ]; then
+  echo "OK"
+else
+  fail "VeChain website latest version $vechain_version mismatches github latest release version $metadata_version"
+fi
+
+echo "Downloading github appimage binary..."
+if curl -L $github_appimage_url -o $TEMPFILE; then
+  echo "OK"
+else
+  fail "failed to download latest github release binary"
+fi
+
+echo -n "Calculating checksum of github release binary..."
+calculated_checksum="$(sha512_base64_checksum $TEMPFILE)"
+echo "OK"
+
+echo "Checksums:"
+echo "calculated:       $calculated_checksum"
+echo "website HTML:     $vechain_checksum"
+echo "github metadata:  $metadata_checksum"
+
+echo -n "Verifying calculated checksum against website content..."
+if [ "$calculated_checksum" = "$vechain_checksum" ]; then
+  echo "OK"
+else
+  fail "Calculated checksum mismatches checksum extracted from ${VECHAIN_URL} HTML"
+fi
+
+echo -n "Verifying calculated checksum against github release metadata..."
+if [ "$calculated_checksum" = "$metadata_checksum" ]; then
+  echo "OK"
+else
+  fail "Calculated checksum mismatches github release metadata"
+fi
+
+echo "$appimage_filename verifies OK"
+
+INSTALL_PATH=~/Desktop/${appimage_filename}
+echo -n "Installing to ${INSTALL_PATH}..."
+if cp $TEMPFILE ${INSTALL_PATH}; then
+  echo "OK"
+else
+  fail "copy failed"
+fi
+
+exit 0
