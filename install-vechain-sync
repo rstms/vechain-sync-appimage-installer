@@ -30,13 +30,18 @@ github_urls() {
   echo "$cached_github_urls"
 }
 
+#query_vechain() {
+#  # use cached vechain website output for dev/test
+#  if [ -e vechain.html ]; then
+#     echo >&2 'WARNING: reading cached vechain.html'
+#     cat vechain.html
+#  else
+#     curl -s https://${VECHAIN_URL}
+#  fi
+#}
+
 query_vechain() {
-  if [ -e vechain.html ]; then
-     echo >&2 'WARNING: reading cached vechain.html'
-     cat vechain.html
-  else
-     curl -s https://${VECHAIN_URL}
-  fi
+  curl -s https://${VECHAIN_URL}
 }
 
 query_vechain_urls() {
