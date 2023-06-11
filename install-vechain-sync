@@ -163,4 +163,7 @@ else
   fail "copy failed"
 fi
 
+chmod +x ${INSTALL_PATH}
+
 exit 0
+
