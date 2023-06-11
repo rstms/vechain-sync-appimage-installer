@@ -6,7 +6,7 @@ VECHAIN_URL=env.vechain.org
 GITHUB_ORG=vechain
 GITHUB_REPO=thor-sync.electron
 
-TEMPFILE=$(tempfile)
+TEMPFILE=$(mktemp)
 cleanup() {
   rm -f $TEMPFILE
 }
